@@ -21,20 +21,8 @@ RUN set -ex \
 	&& python3 -m pip install 'psycopg2-binary==2.9.10' && python3 -m pip install 'Django==5.2' \
     && echo "OK"
 
-# Installer
-FROM base AS installer
-
-WORKDIR /app
-# Copy package manifests for dependency caching
-COPY --chown=app:app package.json yarn.lock .yarnrc.yml ./
-COPY --chown=app:app ./.yarn /app/.yarn
-# Copy all package.json files for workspaces
-COPY --chown=app:app apps/*/package.json ./apps/
-COPY --chown=app:app packages/*/package.json ./packages/
-RUN yarn install --inline-builds
-
-# Builder
-FROM base as builder
+# Builder - combines install and build in one stage for simplicity
+FROM base AS builder
 
 ARG TURBO_TEAM
 ARG TURBO_TOKEN
@@ -42,16 +30,16 @@ ARG TURBO_API
 ARG TURBO_REMOTE_ONLY=false
 
 WORKDIR /app
-# Copy entire repo
+
+# Copy everything
 COPY --chown=app:app . /app
-# Copy previously installed packages
-COPY --from=installer --chown=app:app /app /app
 
 ENV TURBO_TEAM=$TURBO_TEAM
 ENV TURBO_TOKEN=$TURBO_TOKEN
 ENV TURBO_API=$TURBO_API
 ENV TURBO_REMOTE_ONLY=$TURBO_REMOTE_ONLY
 
+# Create build-time .env
 RUN echo "# Build time .env config!" >> /app/.env && \
 	echo "COOKIE_SECRET=undefined" >> /app/.env && \
 	echo "DATABASE_URL=undefined" >> /app/.env && \
@@ -60,11 +48,15 @@ RUN echo "# Build time .env config!" >> /app/.env && \
 	echo "NEXT_TELEMETRY_DISABLED=1" >> /app/.env && \
 	echo "NODE_ENV=production" >> /app/.env
 
-RUN chmod +x ./bin/run_condo_domain_tests.sh
+# Install dependencies
+RUN yarn install --inline-builds
 
+# Make scripts executable
+RUN chmod +x ./bin/run_condo_domain_tests.sh || true
+
+# Build the application
 RUN set -ex \
     && yarn build \
-    && rm -rf /app/out \
     && rm -rf /app/.env  \
     && rm -rf /app/.config /app/.cache /app/.docker  \
     && ls -lah /app/
@@ -74,3 +66,6 @@ FROM base
 USER app:app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
+
+# Default command - can be overridden
+CMD ["yarn", "start"]
