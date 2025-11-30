@@ -1,0 +1,71 @@
+# Garfenter Cloud - Deploy Open Condo to ECR
+name: Deploy Open Condo to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: garfenter/inmuebles
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for OIDC
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/garfenter-github-actions-ecr
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image tags
+        id: tags
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE_TAG="${{ github.sha }}"
+          SHORT_SHA="${IMAGE_TAG:0:7}"
+
+          echo "registry=$ECR_REGISTRY" >> $GITHUB_OUTPUT
+          echo "image_tag=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "full_image=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "latest_image=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.full_image }}
+            ${{ steps.tags.outputs.latest_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            TURBO_TEAM=${{ secrets.TURBO_TEAM }}
+            TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}
+
+      - name: Output image details
+        run: |
+          echo "### Open Condo (Inmuebles) deployed to ECR" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ steps.tags.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ steps.tags.outputs.full_image }}" >> $GITHUB_STEP_SUMMARY
