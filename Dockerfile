@@ -25,12 +25,13 @@ RUN set -ex \
 FROM base AS installer
 
 WORKDIR /app
-# Copy pruned monorepo (only package.json + yarn.lock)
-COPY --chown=app:app ./out /app
-# Copy yarn berry
+# Copy package manifests for dependency caching
+COPY --chown=app:app package.json yarn.lock .yarnrc.yml ./
 COPY --chown=app:app ./.yarn /app/.yarn
-COPY --chown=app:app ./.yarnrc.yml /app/.yarnrc.yml
-RUN yarn install --immutable --inline-builds
+# Copy all package.json files for workspaces
+COPY --chown=app:app apps/*/package.json ./apps/
+COPY --chown=app:app packages/*/package.json ./packages/
+RUN yarn install --inline-builds
 
 # Builder
 FROM base as builder
